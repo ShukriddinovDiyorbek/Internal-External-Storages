@@ -1,22 +1,29 @@
 package com.example.internalexternalstorages
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.text.TextUtils
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.launch
 import androidx.core.content.ContextCompat
 import com.example.internalexternalstorages.databinding.ActivityMainBinding
 import java.io.*
 import java.nio.charset.Charset
+import java.util.*
+import kotlin.collections.ArrayList
 
 class MainActivity : AppCompatActivity() {
-    val isPersistent: Boolean = false
+    val isPersistent: Boolean = true
+    val isInternal: Boolean = false
     lateinit var binding: ActivityMainBinding
     var readPermissionGranted = false
     var writePermissionGranted = false
@@ -32,7 +39,6 @@ class MainActivity : AppCompatActivity() {
         createExternalFile()
 
     }
-
     private fun initViews() {
         requestPermisions()
         binding.bSaveInt.setOnClickListener {
@@ -42,7 +48,7 @@ class MainActivity : AppCompatActivity() {
             readInternalFile()
         }
         binding.bCamera.setOnClickListener {
-
+            takePhoto.launch()
         }
         binding.bSaveExt.setOnClickListener {
             saveExternalFile("Shukriddinov Diyorbek")
@@ -51,6 +57,7 @@ class MainActivity : AppCompatActivity() {
             readExternalFile()
         }
     }
+
     private fun requestPermisions(){
         val hasReadPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE
         ) == PackageManager.PERMISSION_GRANTED
@@ -230,6 +237,69 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "failed", Toast.LENGTH_SHORT).show()
         }
     }
+    //Photo save
+
+    private val takePhoto =
+        registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+            val filename = UUID.randomUUID().toString()
+
+            val isPhotoSaved = if (isInternal) {
+                savePhotoToInternalStorage(filename, bitmap)
+            } else {
+                if (writePermissionGranted) {
+                    savePhotoToExternalStorage(filename, bitmap)
+                } else {
+                    false
+                }
+            }
+
+            if (isPhotoSaved) {
+                Toast.makeText(this, "Photo saved successfully", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Failed to save photo", Toast.LENGTH_SHORT).show()
+            }
+        }
 
 
+    private fun savePhotoToInternalStorage(filename: String, bitmap: Bitmap?): Boolean {
+        return try {
+            openFileOutput("$filename.jpg", MODE_PRIVATE).use { stream ->
+                if (!bitmap!!.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
+                    throw IOException("Couldn't save bitmap")
+                }
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+    private fun savePhotoToExternalStorage(filename: String, bitmap: Bitmap?): Boolean {
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$filename.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpg")
+            put(MediaStore.Images.Media.WIDTH, bitmap!!.width)
+            put(MediaStore.Images.Media.HEIGHT, bitmap.height)
+        }
+
+        return try {
+            contentResolver.insert(collection, contentValues)?.also { uri ->
+                contentResolver.openOutputStream(uri).use { outputStream ->
+                    if (!bitmap!!.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)) {
+                        throw IOException("Couldn't save bitmap")
+                    }
+                }
+            } ?: throw IOException("Couldn't create MediaStore entry")
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }
